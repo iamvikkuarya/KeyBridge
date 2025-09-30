@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KeyBridge</title>
+    <style>
+      html, body, #root { height: 100%; }
+      body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji"; background: #111; color: #e6e6e6; }
+      .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+      .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
+      .brand { display: flex; align-items: center; gap: 10px; }
+      .logo { width: 28px; height: 28px; border-radius: 6px; border: 1px solid #2a2a2a; background: linear-gradient(180deg, #141414, #101010); }
+      .title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
+      .subtitle { font-size: 12px; opacity: 0.7; }
+
+      /* Animations */
+      @keyframes fadeInUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes pop { 0% { transform: scale(0.98); } 100% { transform: scale(1); } }
+      @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(160,160,160,0.15);} 70% { box-shadow: 0 0 0 6px rgba(160,160,160,0);} 100% { box-shadow: 0 0 0 0 rgba(160,160,160,0);} }
+
+      .btn { background: #1a1a1a; border: 1px solid #2a2a2a; color: #e6e6e6; padding: 8px 12px; border-radius: 10px; cursor: pointer; transition: transform 0.15s ease, background 0.15s ease; }
+      .btn:hover { background: #202020; transform: translateY(-1px); }
+      .btn:active { transform: translateY(0); }
+      .icon-btn { display: inline-flex; align-items: center; justify-content: center; aspect-ratio: 1 / 1; width: 40px; padding: 8px; border-radius: 10px; }
+      .send-btn { background: linear-gradient(180deg, #1f1f1f, #131313); border: 1px solid #2a2a2a; color: #e6e6e6; padding: 10px 14px; border-radius: 12px; font-weight: 600; letter-spacing: 0.2px; animation: pop 120ms ease; }
+      .send-btn:hover { background: linear-gradient(180deg, #242424, #161616); }
+
+      .panel { background: #151515; border: 1px solid #2a2a2a; border-radius: 12px; padding: 12px; animation: fadeInUp 180ms ease; }
+      .chat { display: grid; grid-template-rows: 1fr auto; gap: 12px; height: calc(100vh - 90px); }
+      .messages { overflow: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
+      .welcome { background: #141414; border: 1px dashed #2a2a2a; border-radius: 12px; padding: 14px; animation: fadeInUp 220ms ease; max-width: 760px; }
+.welcome-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.4); z-index: 200; padding: 16px; }
+      .modal-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); z-index: 300; padding: 16px; }
+      .modal { width: 520px; max-width: 95vw; }
+      .user-msg { background: #141414; border: 1px solid #2a2a2a; padding: 12px; border-radius: 10px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+      .card { background: #141414; border: 1px solid #2a2a2a; border-radius: 10px; padding: 12px; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+      .card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.2); }
+      .card h4 { margin: 0 0 6px 0; font-size: 13px; letter-spacing: 0.2px; color: #d0d0d0; }
+      .provider-ok { border-color: #2a2a2a; box-shadow: none; }
+      .provider-error { border-color: #2a2a2a; box-shadow: none; }
+      .input-bar { display: flex; gap: 8px; }
+.input { flex: 1; background: #121212; border: 1px solid #2a2a2a; color: #e6e6e6; padding: 10px 12px; border-radius: 10px; overflow-y: hidden; resize: none; min-height: 44px; line-height: 1.35; }
+      .small { font-size: 12px; opacity: 0.75; }
+      .row { display: flex; gap: 8px; align-items: center; }
+      .pill { background: transparent; border: 1px solid #2a2a2a; padding: 4px 8px; border-radius: 999px; font-size: 12px; color: #b5b5b5; }
+      .settings { display: grid; gap: 10px; }
+      .field { display: grid; gap: 6px; }
+      .field input { background: #121212; border: 1px solid #2a2a2a; color: #e6e6e6; padding: 8px 10px; border-radius: 8px; }
+      .divider { height: 1px; background: #222; margin: 6px 0; }
+      .switch { display: flex; gap: 8px; align-items: center; }
+      .muted { color: #b0b0b0; }
+      .hint { color: #c8c8c8; }
+      .pulse { animation: pulse 2s infinite; }
+      .spacer { flex: 1; }
+      .provider-badge { font-size: 11px; opacity: 0.8; }
+      .header-actions { display: flex; gap: 8px; align-items: center; }
+      .welcome-actions { display: flex; gap: 8px; margin-top: 10px; }
+      .welcome .title { font-size: 20px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

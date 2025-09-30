@@ -1,0 +1,13 @@
+{
+"name": "keybridge-root",
+  "private": true,
+  "scripts": {
+    "bootstrap": "npm --prefix server install && npm --prefix client install",
+    "server": "npm --prefix server run dev",
+    "client": "npm --prefix client run dev",
+    "dev": "npm-run-all --parallel server client"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}
