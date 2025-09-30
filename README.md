@@ -1,71 +1,121 @@
 # KeyBridge
 
-Compare answers from multiple LLMs side-by-side — fast, simple, and privacy‑minded.
+Compare answers from multiple LLMs side‑by‑side — fast, simple, and privacy‑minded.
 
-KeyBridge is a local, two‑part app:
-- Client: a clean React + Vite UI with a dynamic input, image uploads, and a centered Settings modal
-- Server: a lightweight Express proxy that calls multiple providers in parallel and auto‑selects suitable models based on your API key
+KeyBridge is a single repo that ships a modern client and a drop‑in API layer:
+- Client (Vite + React): clean monochrome UI, dynamic input, image uploads, centered Settings modal
+- API: provider proxy with auto‑model selection (OpenAI, Anthropic, Google Gemini, xAI Grok, OpenRouter)
 
-Features
+Highlights
 - Side‑by‑side answers for better judgment and clarity
-- Providers: OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini), xAI (Grok), OpenRouter
-- Auto model selection from your API keys (no need to remember exact model names)
-- Image upload (multimodal) support where the model/provider supports images
-- Local key handling: keys are stored in your browser (localStorage) and only sent to your local server per request
-- Clean, monochrome UI with subtle animations and a dynamic, auto‑resizing input
+- Auto‑selects models from your API keys (no need to remember model IDs)
+- Multimodal image support where providers/models allow
+- Keys are stored locally in your browser and sent only per request
+- Smooth animations, responsive grid, and auto‑resizing input
 
-Quick start
+---
+
+Getting started (local)
 1) Install dependencies
 
 ```bash
 npm install
 ```
 
-2) Run client and server together
+2) Start dev (client + local Node server)
 
 ```bash
 npm run dev
 ```
 
 - Client: http://localhost:5173
-- Server: http://localhost:3001
+- Local server: http://localhost:3001
 
 3) Add API keys
-- Click Settings (top‑right), paste your keys for the providers you want, toggle them on, Save
-- Ask a question (optionally upload images) to see provider responses side‑by‑side
+- Click Settings (top‑right), paste keys, toggle providers ON, Save
+- Ask a question and optionally upload images — answers render side‑by‑side
 
-Providers and model selection
-- OpenAI, Gemini, xAI, OpenRouter: models are discovered from the provider’s list endpoints when possible
-- Anthropic: uses a sensible default (due to no public list endpoint) and will work with common Claude models
+---
 
-Security notes
-- This project is designed for local use. If deploying, add HTTPS and a proper secrets strategy (don’t keep keys client‑side in production)
-- The server does not log keys; keys are sent only per request from the browser to your local server
+Deploying to Vercel (recommended)
+This repo is preconfigured to deploy both client and API on Vercel.
+
+What’s deployed
+- Static client built from client/
+- Serverless API function at /api/chat (rewritten by vercel.json)
+
+Steps
+1) Push this repo to GitHub
+2) Import the repo into Vercel (New Project)
+3) Accept defaults (Vite framework). vercel.json already specifies:
+   - buildCommand: npm --prefix client run build
+   - outputDirectory: client/dist
+   - rewrites: /api/* → /api/*
+4) Deploy
+5) Open your Vercel URL, open Settings, paste API keys, toggle providers, Save
+
+Notes
+- Same‑origin calls: the client posts to /api/chat — no CORS needed
+- Payload limits: keep total image payloads small (a few MB) for serverless limits
+- Optional override: set VITE_API_BASE to call a different API origin if you host the API elsewhere
+
+---
+
+Alternate: GitHub Pages (client) + hosted API
+- Deploy client to Pages
+- Host the API separately (Render, Railway, Fly.io, Koyeb, etc.)
+- Set client env VITE_API_BASE=https://your-api.example.com
+
+---
+
+Configuration
+Create environment files as needed (optional):
+
+client/.env.local
+```bash
+VITE_API_BASE=http://localhost:3001   # default empty in production for same‑origin
+```
+
+client/.env.production (only if your API is on another domain)
+```bash
+VITE_API_BASE=https://your-keybridge-api.example.com
+```
+
+Providers and models
+- OpenAI, Gemini, xAI, OpenRouter: models are discovered from provider list endpoints when available
+- Anthropic: uses a sensible default due to lack of a public list endpoint
+
+Security
+- For personal/local use, keys in localStorage are fine; for production, prefer server‑side key storage and authenticated requests
+- The API layer does not log keys; they are forwarded only to providers as needed
 
 Scripts
-- npm run dev — start client and server together
+- npm run dev — start client and local Node server together (dev only)
 - npm run client — start client only
 - npm run server — start server only
+- npm run build — build the client (used by Vercel)
 
 Project structure
 ```
 KeyBridge/
-  client/         # Vite + React UI
-  server/         # Express server (proxy + provider calls)
-  package.json    # root scripts to run both
+  api/            # Vercel Serverless Functions (e.g., /api/chat)
+  client/         # Vite + React client
+  server/         # Local Express server (optional for local dev)
+  vercel.json     # Vercel config (build and rewrites)
+  package.json    # Root scripts + dependencies for API functions
 ```
 
-Roadmap ideas
+Roadmap
 - Streaming responses per provider
-- Conversation history + export
-- Provider‑specific knobs (temperature, max tokens) via advanced settings
-- Keyboard shortcuts and chat slash‑commands
+- Conversation history and export
+- Advanced provider controls (temperature, max tokens)
+- Shortcuts, slash‑commands, and prompt templates
 
 Contributing
-- Issues and PRs are welcome. Please keep changes minimal and cohesive.
+Issues and PRs are welcome. Please keep changes minimal and cohesive.
 
 License
-- No license specified yet. Add one before public distribution.
+Add a license before distributing publicly.
 
 # KeyBridge
 

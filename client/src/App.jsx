@@ -1,5 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react'
 
+const API_BASE = import.meta.env.VITE_API_BASE || ''
+
 function defaultSettings() {
   return { providers: {}, enabled: { openai: false, anthropic: false, google: false, xai: false, openrouter: false } }
 }
@@ -219,7 +221,7 @@ const [welcomeDismissed, setWelcomeDismissed] = useState(() => localStorage.getI
         }
       }
       const attachments = uploads.map(u => ({ mime: u.mime, data: u.data }))
-      const res = await fetch('http://localhost:3001/api/chat', {
+const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [...messages, { role: 'user', content: question }], providers, attachments })
