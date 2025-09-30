@@ -13,6 +13,10 @@ Highlights
 - Keys are stored locally in your browser and sent only per request
 - Smooth animations, responsive grid, and auto‑resizing input
 
+## Live demo
+
+- https://key-bridge-nu.vercel.app
+
 ---
 
 Getting started (local)
@@ -37,36 +41,7 @@ npm run dev
 
 ---
 
-Deploying to Vercel (recommended)
-This repo is preconfigured to deploy both client and API on Vercel.
 
-What’s deployed
-- Static client built from client/
-- Serverless API function at /api/chat (rewritten by vercel.json)
-
-Steps
-1) Push this repo to GitHub
-2) Import the repo into Vercel (New Project)
-3) Accept defaults (Vite framework). vercel.json already specifies:
-   - buildCommand: npm --prefix client run build
-   - outputDirectory: client/dist
-   - rewrites: /api/* → /api/*
-4) Deploy
-5) Open your Vercel URL, open Settings, paste API keys, toggle providers, Save
-
-Notes
-- Same‑origin calls: the client posts to /api/chat — no CORS needed
-- Payload limits: keep total image payloads small (a few MB) for serverless limits
-- Optional override: set VITE_API_BASE to call a different API origin if you host the API elsewhere
-
----
-
-Alternate: GitHub Pages (client) + hosted API
-- Deploy client to Pages
-- Host the API separately (Render, Railway, Fly.io, Koyeb, etc.)
-- Set client env VITE_API_BASE=https://your-api.example.com
-
----
 
 Configuration
 Create environment files as needed (optional):
