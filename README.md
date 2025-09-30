@@ -89,5 +89,3 @@ Roadmap
 Contributing
 Issues and PRs are welcome. Please keep changes minimal and cohesive.
 
-License
-Add a license before distributing publicly.
