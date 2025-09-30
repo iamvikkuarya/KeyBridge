@@ -87,5 +87,6 @@ Roadmap
 - Shortcuts, slash‑commands, and prompt templates
 
 Contributing
+
 Issues and PRs are welcome. Please keep changes minimal and cohesive.
 
