@@ -1,5 +1,5 @@
 {
-"name": "keybridge-client",
+  "name": "keybridge-client",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -9,9 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-"keybridge-root": "file:..",
+    "highlight.js": "^11.9.0",
+    "keybridge-root": "file:..",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",

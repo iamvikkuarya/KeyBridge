@@ -1,0 +1,14 @@
+{
+  "watch": ["index.js"],
+  "ext": "js,mjs,cjs,json",
+  "ignore": [
+    "**/.git/**",
+    "../client/**",
+    "../node_modules/**",
+    "node_modules/**"
+  ],
+  "restartable": "rs",
+  "signal": "SIGINT",
+  "legacy-watch": true,
+  "colours": false
+}

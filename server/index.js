@@ -3,7 +3,7 @@ import cors from 'cors';
 import axios from 'axios';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '20mb' }));
@@ -34,7 +34,7 @@ async function resolveGoogleModel(apiKey) {
   if (resolvedModels.google.has(apiKey)) return resolvedModels.google.get(apiKey);
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
-    const resp = await axios.get(url, { timeout: 12000 });
+    const resp = await axios.get(url, { timeout: 12000, headers: { Referer: 'http://localhost:5173', Origin: 'http://localhost:5173' } });
     const ids = (resp.data?.models || []).map(m => m.name?.split('/').pop()).filter(Boolean);
     const prefer = ['gemini-2.5-pro', 'gemini-2.0-pro', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'];
     const pick = prefer.find(p => ids.includes(p)) || ids.find(id => /^gemini-/.test(id)) || ids[0];
@@ -73,23 +73,19 @@ async function resolveOpenRouterModel(apiKey) {
   if (resolvedModels.openrouter.has(apiKey)) return resolvedModels.openrouter.get(apiKey);
   try {
     const resp = await axios.get('https://openrouter.ai/api/v1/models', {
-headers: { Authorization: `Bearer ${apiKey}`, 'X-Title': 'KeyBridge', 'HTTP-Referer': 'http://localhost:5173' }
+      headers: { Authorization: `Bearer ${apiKey}`, 'X-Title': 'KeyBridge', 'HTTP-Referer': 'http://localhost:5173' }
     });
     const ids = (resp.data?.data || []).map(m => m.id);
-    // Prefer strong, general models if present
-    const prefer = [
-      'anthropic/claude-3.7-sonnet',
-      'anthropic/claude-3.5-sonnet',
-      'openai/gpt-4o',
-      'openai/gpt-4.1-mini',
-      'google/gemini-2.0-pro',
-      'google/gemini-1.5-pro'
-    ];
-    const pick = prefer.find(p => ids.includes(p)) || ids[0];
+
+    // Only allow these two free models; do not fall back to others
+    let pick = null;
+    if (ids.includes('x-ai/grok-4-fast:free')) pick = 'x-ai/grok-4-fast:free';
+    else if (ids.includes('openai/gpt-oss-20b:free')) pick = 'openai/gpt-oss-20b:free';
+
     if (pick) resolvedModels.openrouter.set(apiKey, pick);
-    return pick || 'openai/gpt-4o';
+    return pick || '';
   } catch {
-    return 'openai/gpt-4o';
+    return '';
   }
 }
 
@@ -139,7 +135,8 @@ async function callOpenAI(messages, apiKey, model, attachments = []) {
     const res = await axios.post(url, {
       model,
       messages: payloadMessages,
-      temperature: 0.2
+      temperature: 0.2,
+      max_tokens: 4096
     }, {
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -185,7 +182,7 @@ async function callAnthropic(messages, apiKey, model, attachments = []) {
 
     const res = await axios.post(url, {
       model,
-      max_tokens: 1024,
+      max_tokens: 4096,
       temperature: 0.2,
       system: system || undefined,
       messages: conv
@@ -233,13 +230,17 @@ async function callGoogle(messages, apiKey, model, attachments = []) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const body = {
       contents,
-      generationConfig: { temperature: 0.2, topP: 0.95, maxOutputTokens: 1024 },
+      generationConfig: { temperature: 0.2, topP: 0.95, maxOutputTokens: 8192 },
       systemInstruction: system ? { role: 'user', parts: [{ text: system }] } : undefined
     };
     const res = await axios.post(url, body, { timeout: 60000 });
     const cand = res.data?.candidates?.[0];
     const parts = cand?.content?.parts || [];
     const text = parts.map(p => p.text).filter(Boolean).join('\n');
+    if (!text) {
+      const reason = cand?.finishReason || res.data?.promptFeedback?.blockReason || 'Empty response';
+      return { ok: false, provider: 'google', model, error: String(reason), ms: Date.now() - start };
+    }
     return { ok: true, provider: 'google', model, text, ms: Date.now() - start };
   } catch (err) {
     const msg = err.response?.data?.error?.message || err.message;
@@ -258,7 +259,8 @@ async function callXAI(messages, apiKey, model, attachments = []) {
     const res = await axios.post(url, {
       model,
       messages: payloadMessages,
-      temperature: 0.2
+      temperature: 0.2,
+      max_tokens: 4096
     }, {
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -285,12 +287,13 @@ async function callOpenRouter(messages, apiKey, model, attachments = []) {
     const res = await axios.post(url, {
       model,
       messages: payloadMessages,
-      temperature: 0.2
+      temperature: 0.2,
+      max_tokens: 4096
     }, {
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-'X-Title': 'KeyBridge',
+        'X-Title': 'KeyBridge',
         'HTTP-Referer': 'http://localhost:5173'
       },
       timeout: 60000
@@ -300,6 +303,100 @@ async function callOpenRouter(messages, apiKey, model, attachments = []) {
   } catch (err) {
     const msg = err.response?.data?.error?.message || err.message;
     return { ok: false, provider: 'openrouter', model, error: msg, ms: Date.now() - start };
+  }
+}
+
+// Stream OpenRouter with sentence-level buffering to reduce client updates
+async function streamOpenRouter(messages, apiKey, model, attachments = [], writeFrame) {
+  const url = 'https://openrouter.ai/api/v1/chat/completions';
+  const start = Date.now();
+  const payloadMessages = (attachments && attachments.length)
+    ? splitMessagesAndBuildLastUserWithImages(messages, attachments)
+    : messages;
+  try {
+    const res = await axios.post(url, {
+      model,
+      messages: payloadMessages,
+      temperature: 0.2,
+      stream: true,
+      max_tokens: 4096
+    }, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'X-Title': 'KeyBridge',
+        'HTTP-Referer': 'http://localhost:5173'
+      },
+      responseType: 'stream',
+      timeout: 0
+    });
+
+    return await new Promise((resolve) => {
+      let full = '';
+      let buffer = '';
+      let sentSoFar = '';
+      
+      // Detect sentence endings
+      const isSentenceEnd = (text) => {
+        const trimmed = text.trim();
+        if (!trimmed) return false;
+        const lastChar = trimmed[trimmed.length - 1];
+        // Check for sentence endings: . ! ? or newline
+        return ['.', '!', '?'].includes(lastChar) || text.includes('\n');
+      };
+      
+      const flushBuffer = () => {
+        if (!buffer) return;
+        sentSoFar += buffer;
+        writeFrame({ type: 'result', result: { ok: true, provider: 'openrouter', model, text: sentSoFar, partial: true } });
+        buffer = '';
+      };
+      
+      const onData = (chunk) => {
+        const s = chunk.toString('utf8');
+        const lines = s.split(/\r?\n/);
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          if (trimmed.startsWith('data:')) {
+            const payload = trimmed.slice(5).trim();
+            if (payload === '[DONE]') continue;
+            try {
+              const obj = JSON.parse(payload);
+              const delta = obj.choices?.[0]?.delta?.content || '';
+              if (delta) {
+                full += delta;
+                buffer += delta;
+                
+                // Flush on sentence boundaries
+                if (isSentenceEnd(buffer)) {
+                  flushBuffer();
+                }
+              }
+            } catch {}
+          }
+        }
+      };
+      
+      const onEnd = () => {
+        // Flush any remaining buffer
+        if (buffer) flushBuffer();
+        // Send final complete message
+        writeFrame({ type: 'result', result: { ok: true, provider: 'openrouter', model, text: full, ms: Date.now() - start } });
+        resolve();
+      };
+      
+      const onError = (err) => {
+        writeFrame({ type: 'result', result: { ok: false, provider: 'openrouter', model, error: err?.message || 'Stream error' } });
+        resolve();
+      };
+      
+      res.data.on('data', onData);
+      res.data.on('end', onEnd);
+      res.data.on('error', onError);
+    });
+  } catch (err) {
+    writeFrame({ type: 'result', result: { ok: false, provider: 'openrouter', model, error: err?.message || 'OpenRouter request failed' } });
   }
 }
 
@@ -335,14 +432,50 @@ app.post('/api/chat', async (req, res) => {
       else immediate.push({ ok: false, provider: 'xai', model: '', error: 'Unable to resolve xAI model' });
     }
     if (providers.openrouter?.apiKey) {
-      if (openrouterModel) tasks.push(callOpenRouter(normMessages, providers.openrouter.apiKey, openrouterModel, attachments));
-      else immediate.push({ ok: false, provider: 'openrouter', model: '', error: 'Unable to resolve OpenRouter model' });
+      if (openrouterModel) {
+        // Always use non-streaming for OpenRouter due to client performance issues
+        tasks.push(callOpenRouter(normMessages, providers.openrouter.apiKey, openrouterModel, attachments));
+      } else immediate.push({ ok: false, provider: 'openrouter', model: '', error: 'Unable to resolve OpenRouter model' });
     }
 
     if (tasks.length === 0 && immediate.length === 0) {
       return res.status(400).json({ error: 'No providers configured. Please add API keys in Settings.' });
     }
 
+    const doStream = String(req.query.stream || '') === '1';
+
+    // Streaming mode: send NDJSON frames as results become available
+    if (doStream) {
+      res.setHeader('Content-Type', 'application/x-ndjson');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      const writeFrame = (obj) => {
+        try { res.write(JSON.stringify(obj) + '\n'); } catch {}
+      };
+      // Send any immediate results first (e.g., auto-resolve failures)
+      for (const r of immediate) {
+        writeFrame({ type: 'result', result: r });
+      }
+      if (tasks.length === 0) {
+        return res.end();
+      }
+      // Stream tasks as they settle
+      const never = new Promise(() => {});
+      let pending = tasks.map((p, idx) => p.then(value => ({ idx, status: 'fulfilled', value })).catch(reason => ({ idx, status: 'rejected', reason })));
+      let remaining = pending.length;
+      while (remaining > 0) {
+        const r = await Promise.race(pending);
+        if (!r || typeof r.idx !== 'number') break;
+        // Prevent this promise from winning the race again
+        pending[r.idx] = never;
+        remaining--;
+        const payload = r.status === 'fulfilled' ? r.value : ({ ok: false, error: r.reason?.message || 'Unknown error' });
+        writeFrame({ type: 'result', result: payload });
+      }
+      return res.end();
+    }
+
+    // Non-streaming: wait for all results and return JSON
     const results = tasks.length ? await Promise.allSettled(tasks) : [];
     const normalized = results.map(r => r.status === 'fulfilled' ? r.value : ({ ok: false, error: r.reason?.message || 'Unknown error' }));
     res.json({ results: [...immediate, ...normalized] });
@@ -355,6 +488,116 @@ app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
+// Lightweight API key validation per provider.
+// Returns { ok: boolean, provider, model?, error? }
+app.post('/api/check-key', async (req, res) => {
+  try {
+    const { provider, apiKey } = req.body || {};
+    if (!provider || !apiKey) {
+      return res.status(400).json({ ok: false, error: 'Missing provider or apiKey' });
+    }
+
+    const checks = {
+      async openai() {
+        try {
+          const r = await axios.get('https://api.openai.com/v1/models', {
+            headers: { Authorization: `Bearer ${apiKey}` }, timeout: 12000
+          });
+          const ids = (r.data?.data || []).map(m => m.id);
+          const prefer = ['gpt-4o', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-4', 'gpt-3.5-turbo'];
+          const model = prefer.find(p => ids.includes(p)) || ids[0] || '';
+          return { ok: true, model };
+        } catch (e) {
+          const msg = e.response?.data?.error?.message || e.message || 'OpenAI key check failed';
+          return { ok: false, error: msg };
+        }
+      },
+      async google() {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+          const r = await axios.get(url, { timeout: 12000, headers: { Referer: 'http://localhost:5173', Origin: 'http://localhost:5173' } });
+          const ids = (r.data?.models || []).map(m => m.name?.split('/').pop()).filter(Boolean);
+          const prefer = ['gemini-2.5-pro', 'gemini-2.0-pro', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'];
+          const model = prefer.find(p => ids.includes(p)) || ids.find(id => /^gemini-/.test(id)) || ids[0] || '';
+          return { ok: true, model };
+        } catch (e) {
+          const msg = e.response?.data?.error?.message || e.message || 'Google key check failed';
+          return { ok: false, error: msg };
+        }
+      },
+      async anthropic() {
+        // Anthropic lacks list endpoint; perform a minimal test message with max_tokens=1.
+        // NOTE: This may incur minimal cost on user account.
+        try {
+          const model = 'claude-3-5-sonnet-20240620';
+          const url = 'https://api.anthropic.com/v1/messages';
+          await axios.post(url, {
+            model,
+            max_tokens: 1,
+            messages: [{ role: 'user', content: 'ping' }]
+          }, {
+            headers: {
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json'
+            },
+            timeout: 12000
+          });
+          return { ok: true, model };
+        } catch (e) {
+          const msg = e.response?.data?.error?.message || e.message || 'Anthropic key check failed';
+          return { ok: false, error: msg };
+        }
+      },
+      async xai() {
+        try {
+          const r = await axios.get('https://api.x.ai/v1/models', {
+            headers: { Authorization: `Bearer ${apiKey}` }, timeout: 12000
+          });
+          const ids = (r.data?.data || []).map(m => m.id);
+          const prefer = ['grok-2', 'grok-2-mini', 'grok-2-1212', 'grok-beta'];
+          const model = prefer.find(p => ids.includes(p)) || ids[0] || '';
+          return { ok: true, model };
+        } catch (e) {
+          const msg = e.response?.data?.error?.message || e.message || 'xAI key check failed';
+          return { ok: false, error: msg };
+        }
+      },
+      async openrouter() {
+        try {
+          const r = await axios.get('https://openrouter.ai/api/v1/models', {
+            headers: { Authorization: `Bearer ${apiKey}`, 'X-Title': 'KeyBridge', 'HTTP-Referer': 'http://localhost:5173' },
+            timeout: 12000
+          });
+          const ids = (r.data?.data || []).map(m => m.id);
+
+          // Only allow these two free models; do not fall back to others
+          let model = '';
+          if (ids.includes('x-ai/grok-4-fast:free')) model = 'x-ai/grok-4-fast:free';
+          else if (ids.includes('openai/gpt-oss-20b:free')) model = 'openai/gpt-oss-20b:free';
+
+          if (!model) {
+            return { ok: false, error: 'OpenRouter free models not available: x-ai/grok-4-fast:free or openai/gpt-oss-20b:free' };
+          }
+
+          return { ok: true, model };
+        } catch (e) {
+          const msg = e.response?.data?.error?.message || e.message || 'OpenRouter key check failed';
+          return { ok: false, error: msg };
+        }
+      }
+    };
+
+    const fn = checks[provider];
+    if (!fn) return res.status(400).json({ ok: false, error: 'Unknown provider' });
+    const out = await fn();
+    try { console.log(`[check-key] provider=${provider} key=${redactKey(apiKey)} -> ${out.ok ? `ok ${out.model || ''}` : `error ${out.error || ''}`}`) } catch {}
+    res.json({ provider, ...out });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || 'Server error' });
+  }
+});
+
 app.listen(PORT, () => {
-console.log(`KeyBridge server running on http://localhost:${PORT}`);
+  console.log(`KeyBridge server running on http://localhost:${PORT}`);
 });

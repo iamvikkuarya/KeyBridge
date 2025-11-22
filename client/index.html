@@ -22,7 +22,7 @@
       .btn { background: #1a1a1a; border: 1px solid #2a2a2a; color: #e6e6e6; padding: 8px 12px; border-radius: 10px; cursor: pointer; transition: transform 0.15s ease, background 0.15s ease; }
       .btn:hover { background: #202020; transform: translateY(-1px); }
       .btn:active { transform: translateY(0); }
-      .icon-btn { display: inline-flex; align-items: center; justify-content: center; aspect-ratio: 1 / 1; width: 40px; padding: 8px; border-radius: 10px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; aspect-ratio: 1 / 1; width: 44px; padding: 10px; border-radius: 12px; }
       .send-btn { background: linear-gradient(180deg, #1f1f1f, #131313); border: 1px solid #2a2a2a; color: #e6e6e6; padding: 10px 14px; border-radius: 12px; font-weight: 600; letter-spacing: 0.2px; animation: pop 120ms ease; }
       .send-btn:hover { background: linear-gradient(180deg, #242424, #161616); }
 
@@ -34,15 +34,20 @@
       .modal-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); z-index: 300; padding: 16px; }
       .modal { width: 520px; max-width: 95vw; }
       .user-msg { background: #141414; border: 1px solid #2a2a2a; padding: 12px; border-radius: 10px; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
-      .card { background: #141414; border: 1px solid #2a2a2a; border-radius: 10px; padding: 12px; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+.card { background: #141414; border: 1px solid #2a2a2a; border-radius: 10px; padding: 12px; transition: transform 0.15s ease, box-shadow 0.15s ease; overflow: hidden; }
       .card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.2); }
       .card h4 { margin: 0 0 6px 0; font-size: 13px; letter-spacing: 0.2px; color: #d0d0d0; }
       .provider-ok { border-color: #2a2a2a; box-shadow: none; }
       .provider-error { border-color: #2a2a2a; box-shadow: none; }
-      .input-bar { display: flex; gap: 8px; }
-.input { flex: 1; background: #121212; border: 1px solid #2a2a2a; color: #e6e6e6; padding: 10px 12px; border-radius: 10px; overflow-y: hidden; resize: none; min-height: 44px; line-height: 1.35; }
-      .small { font-size: 12px; opacity: 0.75; }
+.input-bar { display: flex; gap: 8px; align-items: stretch; position: sticky; bottom: 0; background: #151515; padding-bottom: env(safe-area-inset-bottom); }
+.input { flex: 1; background: #121212; border: 1px solid #2a2a2a; color: #e6e6e6; padding: 12px 14px; border-radius: 12px; overflow-y: hidden; resize: none; min-height: 48px; line-height: 1.45; font-size: 14px; }
+@media (max-width: 640px) { .input-bar { flex-direction: column; } .send-btn, .icon-btn { width: 100%; } }
+.small { font-size: 12px; opacity: 0.75; }
+.code { background: #0f0f0f; border: 1px solid #2a2a2a; border-radius: 8px; padding: 8px; overflow: auto; }
+.hljs { background: transparent !important; }
       .row { display: flex; gap: 8px; align-items: center; }
       .pill { background: transparent; border: 1px solid #2a2a2a; padding: 4px 8px; border-radius: 999px; font-size: 12px; color: #b5b5b5; }
       .settings { display: grid; gap: 10px; }

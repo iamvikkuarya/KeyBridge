@@ -82,12 +82,7 @@ async function resolveOpenRouterModel(apiKey) {
     });
     const ids = (resp.data?.data || []).map(m => m.id);
     const prefer = [
-      'anthropic/claude-3.7-sonnet',
-      'anthropic/claude-3.5-sonnet',
-      'openai/gpt-4o',
-      'openai/gpt-4.1-mini',
-      'google/gemini-2.0-pro',
-      'google/gemini-1.5-pro'
+      'deepseek/deepseek-r1:free'
     ];
     const pick = prefer.find(p => ids.includes(p)) || ids[0];
     return pick || 'openai/gpt-4o';
@@ -214,6 +209,10 @@ module.exports = async function handler(req, res) {
     const { messages = [], providers = {}, attachments = [] } = body;
 
     const normMessages = normalizeMessages(messages);
+
+    // Streaming mode via NDJSON
+    const stream = (req.query && req.query.stream === '1')
+
     const tasks = [];
     const immediate = [];
 
@@ -254,8 +253,27 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'No providers configured. Please add API keys in Settings.' });
     }
 
-    const results = tasks.length ? await Promise.all(tasks) : [];
-    return res.json({ results: [...immediate, ...results] });
+    if (stream) {
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
+      // Send immediate first
+      for (const im of immediate) {
+        res.write(JSON.stringify({ type: 'result', result: im }) + '\n')
+      }
+      // Stream each provider as it completes
+      for (const p of tasks) {
+        try {
+          const r = await p
+          res.write(JSON.stringify({ type: 'result', result: r }) + '\n')
+        } catch (e) {
+          const err = { ok: false, error: e.message || 'Unknown error' }
+          res.write(JSON.stringify({ type: 'result', result: err }) + '\n')
+        }
+      }
+      return res.end()
+    } else {
+      const results = tasks.length ? await Promise.all(tasks) : [];
+      return res.json({ results: [...immediate, ...results] });
+    }
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Server error' });
   }

@@ -1,4 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import hljs from 'highlight.js'
 
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
@@ -35,6 +38,79 @@ function ProviderSwitch({ id, label, enabled, onToggle }) {
 
 function Settings({ open, onClose, settings, setSettings }) {
   const [local, setLocal] = useState(settings)
+  const [status, setStatus] = useState({ openai: 'idle', anthropic: 'idle', google: 'idle', xai: 'idle', openrouter: 'idle' })
+  const [statusMsg, setStatusMsg] = useState({})
+  const timersRef = useRef({})
+
+  const StatusDot = ({ state = 'idle', title = '' }) => {
+    let color = '#444'
+    if (state === 'checking') color = '#e6c229' // yellow
+    else if (state === 'ok') color = '#52c41a' // green
+    else if (state === 'error' || state === 'idle') color = '#ff4d4f' // red
+    return (
+      <span title={title} aria-label={title} style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: color, border: '1px solid #2a2a2a' }} />
+    )
+  }
+
+  const testKey = async (id, key) => {
+    if (!key || !key.trim()) {
+      setStatus(prev => ({ ...prev, [id]: 'idle' }))
+      setStatusMsg(prev => ({ ...prev, [id]: '' }))
+      return
+    }
+    setStatus(prev => ({ ...prev, [id]: 'checking' }))
+    setStatusMsg(prev => ({ ...prev, [id]: 'Checking…' }))
+    try {
+      const res = await fetch(`${API_BASE}/api/check-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: id, apiKey: key })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.ok) {
+        setStatus(prev => ({ ...prev, [id]: 'ok' }))
+        setStatusMsg(prev => ({ ...prev, [id]: data.model ? `Model: ${data.model}` : 'Connected' }))
+      } else {
+        // Fallback for Google keys restricted to HTTP referrers: try browser-side check
+        if (id === 'google') {
+          try {
+            const gr = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`)
+            const gdata = await gr.json().catch(() => ({}))
+            if (gr.ok) {
+              const models = (gdata?.models || []).map(m => m.name?.split('/').pop()).filter(Boolean)
+              const prefer = ['gemini-2.5-pro', 'gemini-2.0-pro', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']
+              const model = prefer.find(p => models.includes(p)) || models.find(id => /^gemini-/.test(id)) || models[0] || ''
+              setStatus(prev => ({ ...prev, [id]: 'ok' }))
+              setStatusMsg(prev => ({ ...prev, [id]: model ? `Model: ${model}` : 'Connected' }))
+              return
+            } else {
+              const msg = gdata?.error?.message || data.error || 'Failed to connect'
+              setStatus(prev => ({ ...prev, [id]: 'error' }))
+              setStatusMsg(prev => ({ ...prev, [id]: msg }))
+              return
+            }
+          } catch (e2) {
+            setStatus(prev => ({ ...prev, [id]: 'error' }))
+            setStatusMsg(prev => ({ ...prev, [id]: e2.message || data.error || 'Failed to connect' }))
+            return
+          }
+        }
+        setStatus(prev => ({ ...prev, [id]: 'error' }))
+        setStatusMsg(prev => ({ ...prev, [id]: data.error || `Failed to connect` }))
+      }
+    } catch (e) {
+      setStatus(prev => ({ ...prev, [id]: 'error' }))
+      setStatusMsg(prev => ({ ...prev, [id]: e.message || 'Failed to connect' }))
+    }
+  }
+
+  const scheduleTest = (id, key) => {
+    if (timersRef.current[id]) clearTimeout(timersRef.current[id])
+    timersRef.current[id] = setTimeout(() => {
+      testKey(id, key)
+    }, 500)
+  }
+
   const updateProvider = (id, field, value) => {
     setLocal(prev => ({
       ...prev,
@@ -43,15 +119,36 @@ function Settings({ open, onClose, settings, setSettings }) {
         [id]: { ...(prev.providers?.[id] || {}), [field]: value }
       }
     }))
+    if (field === 'apiKey') {
+      scheduleTest(id, value)
+    }
   }
+
   const updateEnabled = (id, value) => {
     setLocal(prev => ({ ...prev, enabled: { ...prev.enabled, [id]: value } }))
   }
+
+  useEffect(() => {
+    // On open, kick off checks for any existing keys
+    if (open) {
+      const p = local.providers || {}
+      for (const id of ['openai','anthropic','google','xai','openrouter']) {
+        const key = p?.[id]?.apiKey || ''
+        if (key) scheduleTest(id, key)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
   const save = () => {
-    // Drop any model names, we auto-select based on API key
     const cleaned = {
       ...local,
-      providers: Object.fromEntries(Object.entries(local.providers || {}).map(([k, v]) => [k, { apiKey: v.apiKey || '' }]))
+      providers: Object.fromEntries(
+        Object.entries(local.providers || {}).map(([k, v]) => [
+          k,
+          { apiKey: (v.apiKey || '').trim(), model: (v.model || '').trim() }
+        ])
+      )
     }
     saveSettings(cleaned)
     setSettings(cleaned)
@@ -72,46 +169,78 @@ function Settings({ open, onClose, settings, setSettings }) {
         <div className="settings">
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <ProviderSwitch id="openai" label="OpenAI (ChatGPT)" enabled={local.enabled?.openai} onToggle={updateEnabled} />
-          <span className="pill provider-badge">Auto</span>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <StatusDot state={status.openai} title={statusMsg.openai || (status.openai==='ok'?'Connected':'Not connected')} />
+            <span className="pill provider-badge">Auto</span>
+          </div>
         </div>
         <div className="field">
-          <input placeholder="OpenAI API Key" value={local.providers?.openai?.apiKey || ''} onChange={e => updateProvider('openai', 'apiKey', e.target.value)} />
+<input placeholder='OpenAI API Key' value={local.providers?.openai?.apiKey || ''} onChange={e => updateProvider('openai', 'apiKey', e.target.value)} />
+          {statusMsg.openai && <span className="small muted">{statusMsg.openai}</span>}
         </div>
 
         <div className="divider"></div>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <ProviderSwitch id="anthropic" label="Anthropic (Claude)" enabled={local.enabled?.anthropic} onToggle={updateEnabled} />
-          <span className="pill provider-badge">Auto</span>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <StatusDot state={status.anthropic} title={statusMsg.anthropic || (status.anthropic==='ok'?'Connected':'Not connected')} />
+            <span className="pill provider-badge">Auto</span>
+          </div>
         </div>
         <div className="field">
-          <input placeholder="Anthropic API Key" value={local.providers?.anthropic?.apiKey || ''} onChange={e => updateProvider('anthropic', 'apiKey', e.target.value)} />
+<input placeholder='Anthropic API Key' value={local.providers?.anthropic?.apiKey || ''} onChange={e => updateProvider('anthropic', 'apiKey', e.target.value)} />
+          {statusMsg.anthropic && <span className="small muted">{statusMsg.anthropic}</span>}
         </div>
 
         <div className="divider"></div>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <ProviderSwitch id="google" label="Google (Gemini)" enabled={local.enabled?.google} onToggle={updateEnabled} />
-          <span className="pill provider-badge">Auto</span>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <StatusDot state={status.google} title={statusMsg.google || (status.google==='ok'?'Connected':'Not connected')} />
+            <span className="pill provider-badge">Auto</span>
+          </div>
         </div>
         <div className="field">
-          <input placeholder="Google API Key" value={local.providers?.google?.apiKey || ''} onChange={e => updateProvider('google', 'apiKey', e.target.value)} />
+<input placeholder='Google API Key' value={local.providers?.google?.apiKey || ''} onChange={e => updateProvider('google', 'apiKey', e.target.value)} />
+          {statusMsg.google && <span className="small muted">{statusMsg.google}</span>}
         </div>
 
         <div className="divider"></div>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <ProviderSwitch id="xai" label="xAI (Grok)" enabled={local.enabled?.xai} onToggle={updateEnabled} />
-          <span className="pill provider-badge">Auto</span>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <StatusDot state={status.xai} title={statusMsg.xai || (status.xai==='ok'?'Connected':'Not connected')} />
+            <span className="pill provider-badge">Auto</span>
+          </div>
         </div>
         <div className="field">
-          <input placeholder="xAI API Key" value={local.providers?.xai?.apiKey || ''} onChange={e => updateProvider('xai', 'apiKey', e.target.value)} />
+<input placeholder='xAI API Key' value={local.providers?.xai?.apiKey || ''} onChange={e => updateProvider('xai', 'apiKey', e.target.value)} />
+          {statusMsg.xai && <span className="small muted">{statusMsg.xai}</span>}
         </div>
 
         <div className="divider"></div>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <ProviderSwitch id="openrouter" label="OpenRouter" enabled={local.enabled?.openrouter} onToggle={updateEnabled} />
-          <span className="pill provider-badge">Auto</span>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <StatusDot state={status.openrouter} title={statusMsg.openrouter || (status.openrouter==='ok'?'Connected':'Not connected')} />
+            <span className="pill provider-badge">Auto</span>
+          </div>
         </div>
         <div className="field">
-          <input placeholder="OpenRouter API Key" value={local.providers?.openrouter?.apiKey || ''} onChange={e => updateProvider('openrouter', 'apiKey', e.target.value)} />
+<input placeholder='OpenRouter API Key' value={local.providers?.openrouter?.apiKey || ''} onChange={e => updateProvider('openrouter', 'apiKey', e.target.value)} />
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span className="small muted">Model: {local.providers?.openrouter?.model || 'Select a model'}</span>
+            <select
+              value={local.providers?.openrouter?.model || ''}
+              onChange={e => updateProvider('openrouter', 'model', e.target.value)}
+              style={{ appearance: 'none', background: '#1e1e1e', color: '#e6e6e6', border: '1px solid #2a2a2a', borderRadius: 999, padding: '4px 10px', fontSize: 12 }}
+            >
+              <option value="">Select a model</option>
+              <option value="x-ai/grok-4-fast:free">Grok 4 Fast (free)</option>
+              <option value="openai/gpt-oss-20b:free">GPT-OSS 20B (free)</option>
+            </select>
+          </div>
+          <span className="small muted">Only these free models are supported for now.</span>
         </div>
 
         <div className="divider"></div>
@@ -127,7 +256,71 @@ function Settings({ open, onClose, settings, setSettings }) {
   )
 }
 
-function Message({ m }) {
+function copyText(text) {
+  try { navigator.clipboard.writeText(text || ''); } catch {}
+}
+
+function ProviderCard({ it, onRetry, onDelete }) {
+  const [expanded, setExpanded] = useState(false)
+  const content = it.text || it.error || ''
+  const isLong = content.length > 1200
+  const shown = expanded || !isLong ? content : content.slice(0, 1200) + '…'
+
+  useEffect(() => {
+    // Lazy-highlight code blocks after render
+    document.querySelectorAll('pre code').forEach((el) => {
+      try { hljs.highlightElement(el) } catch {}
+    })
+  }, [shown])
+
+  return (
+    <div className={`card ${it.ok ? 'provider-ok' : 'provider-error'}`}>
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <h4>{it.label}</h4>
+        <div className="row">
+          {it.ok && <button className="btn" onClick={() => copyText(it.text || '')}>Copy</button>}
+          <button className="btn" onClick={() => onRetry?.(it)}>Retry</button>
+          <button className="btn" onClick={() => onDelete?.(it)}>Delete</button>
+        </div>
+      </div>
+      {it.ok ? (
+        <div>
+          {it.streaming ? (
+            // Simple text display while streaming - no markdown parsing
+            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+              {shown || '…'}
+            </div>
+          ) : (
+            // Full markdown after streaming completes
+            String(shown || '').trim() ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                code({node, inline, className, children, ...props}) {
+                  return !inline ? (
+                    <pre className="code"><code className={className} {...props}>{children}</code></pre>
+                  ) : (
+                    <code className={className} {...props}>{children}</code>
+                  )
+                }
+              }}>{shown}</ReactMarkdown>
+            ) : (
+              <div className="small muted">No content</div>
+            )
+          )}
+          {isLong && !it.streaming && (
+            <button className="btn" style={{ marginTop: 8 }} onClick={() => setExpanded(v => !v)}>
+              {expanded ? 'Show less' : 'Show more'}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="small" style={{ color: '#ffb4b0' }}>{it.error || 'Error'}</div>
+      )}
+      <div className="small muted" style={{ marginTop: 8 }}>{it.model}</div>
+    </div>
+  )
+}
+
+function Message({ m, onRetryProvider, onDeleteProvider }) {
   if (m.role === 'user') {
     return (
       <div className="user-msg">
@@ -147,18 +340,7 @@ function Message({ m }) {
     return (
       <div className="grid">
         {m.items.map((it, idx) => (
-          <div key={idx} className={`card ${it.ok ? 'provider-ok' : 'provider-error'}`}>
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <h4>{it.label}</h4>
-              <span className="pill">{it.ms != null ? `${it.ms} ms` : ''}</span>
-            </div>
-            {it.ok ? (
-              <div style={{ whiteSpace: 'pre-wrap' }}>{it.text || ''}</div>
-            ) : (
-              <div className="small" style={{ color: '#ffb4b0' }}>{it.error || 'Error'}</div>
-            )}
-            <div className="small muted" style={{ marginTop: 8 }}>{it.model}</div>
-          </div>
+          <ProviderCard key={idx} it={it} onRetry={prov => onRetryProvider?.(prov)} onDelete={prov => onDeleteProvider?.(prov)} />
         ))}
       </div>
     )
@@ -173,9 +355,13 @@ export default function App() {
   const [messages, setMessages] = useState([])
   const [busy, setBusy] = useState(false)
   const [uploads, setUploads] = useState([]) // {name,mime,data(base64),dataUrl}
-const [welcomeDismissed, setWelcomeDismissed] = useState(() => localStorage.getItem('keybridge_welcome_dismissed') === '1')
+  const [welcomeDismissed, setWelcomeDismissed] = useState(() => localStorage.getItem('keybridge_welcome_dismissed') === '1')
+  const [streaming, setStreaming] = useState(true)
+  const [toasts, setToasts] = useState([])
+  const abortRef = useRef(null)
   const fileRef = useRef(null)
   const inputRef = useRef(null)
+  const placeholderIdxRef = useRef(-1)
 
   const activeProviders = useMemo(() => Object.entries(settings.enabled || {}).filter(([, v]) => v).map(([k]) => k), [settings])
 
@@ -201,16 +387,16 @@ const [welcomeDismissed, setWelcomeDismissed] = useState(() => localStorage.getI
     setUploads(prev => [...prev, ...newOnes])
   }
 
-  const send = async () => {
+  const send = async (opts={}) => {
     const question = input.trim()
     if (!question && uploads.length === 0) return
     if (!activeProviders.length) {
       alert('Please enable at least one provider and set API keys in Settings.')
       return
     }
-    setInput('')
+    if (!opts.retry) setInput('')
     const userMsg = { role: 'user', content: question || '(image)', attachments: uploads }
-    setMessages(prev => [...prev, userMsg])
+    if (!opts.retry) setMessages(prev => [...prev, userMsg])
     setBusy(true)
     try {
       const providers = {}
@@ -221,20 +407,114 @@ const [welcomeDismissed, setWelcomeDismissed] = useState(() => localStorage.getI
         }
       }
       const attachments = uploads.map(u => ({ mime: u.mime, data: u.data }))
-const res = await fetch(`${API_BASE}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...messages, { role: 'user', content: question }], providers, attachments })
-      })
-      const data = await res.json()
-      const items = (data.results || []).map(r => {
-        const id = r.provider
-        const label = id === 'openai' ? 'OpenAI' : id === 'anthropic' ? 'Claude' : id === 'google' ? 'Gemini' : id === 'xai' ? 'Grok' : id === 'openrouter' ? 'OpenRouter' : 'Provider'
-        return r.ok ? { ok: true, label, text: r.text, ms: r.ms, model: r.model } : { ok: false, label, error: r.error || 'Error', ms: r.ms, model: r.model || '' }
-      })
-      setMessages(prev => [...prev, { role: 'multi', items }])
+
+      if (abortRef.current) { try { abortRef.current.abort() } catch {} }
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      if (streaming) {
+        const res = await fetch(`${API_BASE}/api/chat?stream=1`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: [{ role: 'user', content: question }], providers, attachments }),
+          signal: controller.signal
+        })
+        if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`)
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        // create placeholder cards
+        const placeholder = Object.keys(providers).map(id => ({ ok: false, label: id==='openai'?'OpenAI': id==='anthropic'?'Claude': id==='google'?'Gemini': id==='xai'?'Grok': id==='openrouter'?'OpenRouter':'Provider', text: '', error: 'Waiting…', model: '', ms: null }))
+        setMessages(prev => {
+          const idx = prev.length
+          placeholderIdxRef.current = idx
+          return [...prev, { role: 'multi', items: placeholder }]
+        })
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const parts = buffer.split('\n')
+          buffer = parts.pop() || ''
+          for (const line of parts) {
+            if (!line.trim()) continue
+            try {
+              const frame = JSON.parse(line)
+              if (frame.type === 'result') {
+                const r = frame.result
+                setMessages(prev => {
+                  const copy = prev.slice()
+                  const targetIdx = (placeholderIdxRef.current >= 0 && placeholderIdxRef.current < copy.length)
+                    ? placeholderIdxRef.current
+                    : (() => {
+                        for (let i = copy.length - 1; i >= 0; i--) {
+                          if (copy[i].role === 'multi') return i
+                        }
+                        return -1
+                      })()
+                  if (targetIdx !== -1) {
+                    const list = copy[targetIdx].items.slice()
+                    const label = r.provider==='openai'?'OpenAI': r.provider==='anthropic'?'Claude': r.provider==='google'?'Gemini': r.provider==='xai'?'Grok': r.provider==='openrouter'?'OpenRouter':'Provider'
+                    // find existing item for this provider, or a waiting placeholder
+                    let pos = list.findIndex(it => it.label === label)
+                    if (pos === -1) pos = list.findIndex(it => it.label === label && it.text==='' && it.error==='Waiting…')
+                    const prevItem = pos !== -1 ? list[pos] : null
+                    if (r.ok) {
+                      // For partial updates, just replace the text (sentence-level updates from server)
+                      const newText = r.partial ? r.text : (r.text || prevItem?.text || '')
+                      const isStreaming = !!r.partial
+                      const newItem = { ok: true, label, text: newText, streaming: isStreaming, ms: r.ms ?? prevItem?.ms ?? null, model: r.model || prevItem?.model || '' }
+                      if (pos !== -1) list[pos] = newItem
+                      else list.push(newItem)
+                    } else {
+                      const newItem = { ok: false, label, error: r.error || 'Error', streaming: false, ms: r.ms ?? prevItem?.ms ?? null, model: r.model || prevItem?.model || '' }
+                      if (pos !== -1) list[pos] = newItem
+                      else list.push(newItem)
+                    }
+                    copy[targetIdx] = { ...copy[targetIdx], items: list }
+                  }
+                  return copy
+                })
+              }
+            } catch {}
+          }
+        }
+        // Finalize: mark any leftover placeholders
+        const finalizeIdx = placeholderIdxRef.current
+        setMessages(prev => {
+          const copy = prev.slice()
+          const idx = (finalizeIdx >= 0 && finalizeIdx < copy.length)
+            ? finalizeIdx
+            : (() => { for (let i = copy.length - 1; i >= 0; i--) { if (copy[i].role === 'multi') return i } return -1 })()
+          if (idx !== -1) {
+            const list = copy[idx].items.map(it => {
+              if (it.text === '' && it.error === 'Waiting…') return { ...it, ok: false, error: 'No response', streaming: false }
+              if (it.streaming) return { ...it, streaming: false }
+              return it
+            })
+            copy[idx] = { ...copy[idx], items: list }
+          }
+          return copy
+        })
+        // Reset placeholder index after stream completes
+        placeholderIdxRef.current = -1
+      } else {
+        const res = await fetch(`${API_BASE}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: [{ role: 'user', content: question }], providers, attachments }),
+          signal: controller.signal
+        })
+        const data = await res.json()
+        const items = (data.results || []).map(r => {
+          const id = r.provider
+          const label = id === 'openai' ? 'OpenAI' : id === 'anthropic' ? 'Claude' : id === 'google' ? 'Gemini' : id === 'xai' ? 'Grok' : id === 'openrouter' ? 'OpenRouter' : 'Provider'
+          return r.ok ? { ok: true, label, text: r.text, ms: r.ms, model: r.model } : { ok: false, label, error: r.error || 'Error', ms: r.ms, model: r.model || '' }
+        })
+        setMessages(prev => [...prev, { role: 'multi', items }])
+      }
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'multi', items: [{ ok: false, label: 'Error', error: e.message, model: '', ms: null }] }])
+      setToasts(t => [...t, { id: Date.now().toString(), text: e.message || 'Request failed', action: 'Retry', onAction: () => send({ retry: true }) }])
+      if (!streaming) setMessages(prev => [...prev, { role: 'multi', items: [{ ok: false, label: 'Error', error: e.message, model: '', ms: null }] }])
     } finally {
       setBusy(false)
       setUploads([])
